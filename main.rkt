@@ -107,7 +107,7 @@
 (define (run-snippet client db message code)
   (let ([code (strip-backticks code)])
     (with-typing-indicator client message
-      (thunk (ev:run code (evaluation-ctx #f client message db (context-id message) "" #f))))))
+      (thunk (ev:run code (evaluation-ctx #f client message db (context-id message) "" #f) http:attachment?)))))
 
 (define (register-trick client db message text)
   (check-trick-prereqs
@@ -139,7 +139,8 @@
                       db
                       context-id
                       (or body "")
-                      #f)))))
+                      #f)
+                     http:attachment?))))
          (~a "Trick " name " doesn't exist!")))))
 
 (define (update-trick client db message text)
@@ -264,7 +265,8 @@
                         db
                         context-id
                         (if arguments (~a arguments) "")
-                        parent-ctx)))
+                        parent-ctx)
+                       (const #t)))
                list)])
           (write-string stdout)
           (unless (void? stderr) (write-string stderr (current-error-port)))
@@ -283,7 +285,7 @@
   (let ([datum (and~> trick
                       trick-storage
                       (hash-ref (cdr (storage-info message type)) #f)
-                      (with-input-from-bytes read)
+                      (with-input-from-string read)
                       (with-handlers ([exn:fail:read? (const #f)]) _))])
     (and (not (eof-object? datum)) datum)))
 (define/contract (write-storage trick message type data)
@@ -293,9 +295,9 @@
    (match-let ([(cons limit key) (storage-info message type)])
      (and
       key
-      (let ([data (with-output-to-bytes (curry write data))])
+      (let ([data (with-output-to-string (curry write data))])
         (and
-         (<= (bytes-length data) limit)
+         (<= (string-length data) limit)
          (begin
            (hash-set! (trick-storage trick) key data)
            #t)))))))
@@ -372,6 +374,7 @@
   (hasheq 'author (trick-author trick)
           'body (trick-body trick)
           'created (trick-created trick)
+          'data (trick-storage trick)
           'invocations (trick-invocations trick)))
 
 (define (json->trick json)
@@ -379,7 +382,7 @@
    (hash-ref json 'author)
    (hash-ref json 'body)
    (hash-ref json 'created)
-   (make-hash) ; We purposefully don't save the trick storage due to space limits
+   (hash-ref json 'data make-hash)
    (hash-ref json 'invocations)))
 
 (define command-table
@@ -423,14 +426,8 @@
           (format "~a... [~a more characters]" (substring str 0 slicepos) restsize))
         str)))
 
-(define (empty-string? s)
-  (and (string? s) (= (string-length s) 0)))
-
-(define (create-message-with-contents client channel message . contents)
-  (let* ([content (apply ~a #:separator "\n"
-                         (~>> contents
-                              (map (lambda (x) (if (custom-write? x) "#<redacted>" x)))
-                              (filter-not (disjoin void? http:attachment? empty-string?))))]
+(define ((create-message-with-contents client channel message) . contents)
+  (let* ([content (apply ~a #:separator "\n" (filter string? contents))]
          [attachment (findf http:attachment? contents)]
          [content (if (or attachment (non-empty-string? content))
                       (truncate-string content char-cap)
@@ -449,7 +446,7 @@
       (match-let ([(cons func content) (parse-command content)])
         (when func
           (call-with-values (thunk (func client db message content))
-                            (curry create-message-with-contents client channel message)))))))
+                            (create-message-with-contents client channel message)))))))
 
 (define (init-client folder token)
   (log-r16-info "Storing tricks in ~a" folder)
