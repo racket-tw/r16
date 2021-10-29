@@ -20,12 +20,14 @@
     (init-field db)
     (field [start-time (current-seconds)])
 
-    (define (evaluation-context enrich-context context-id trick args parent-ctx)
+    (define (evaluation-context enrich-context context-id trick name args parent-ctx)
+      (define real-args (string->immutable-string args))
       (define this-context #f)
 
       (define/contract (call-subtrick name arguments)
         (-> (or/c symbol? string?) any/c any)
-        (define trick-obj (db:get-trick db context-id (~a name)))
+        (define strname (~a name))
+        (define trick-obj (db:get-trick db context-id strname))
         (if trick-obj
             (let ()
               (define rr
@@ -35,6 +37,7 @@
                   enrich-context
                   context-id
                   trick-obj
+                  strname
                   (if arguments (~a arguments) "")
                   this-context)
                  (const #t)))
@@ -46,15 +49,16 @@
 
       (define (read-args)
         (with-handlers ([exn:fail:read? (const #f)])
-          (sequence->list (in-producer read eof (open-input-string args)))))
+          (sequence->list (in-producer read eof (open-input-string real-args)))))
 
       (define base
-        `(((string-args    . ,args)
+        `(((string-args    . ,real-args)
            (read-args      . ,read-args)
            (call-trick     . ,call-subtrick)
-           (parent-context . ,(and parent-ctx (make-hash (car parent-ctx)))))
+           (trick-name     . ,(string->immutable-string name))
+           (parent-context . ,(and parent-ctx (make-immutable-hash (car parent-ctx)))))
           threading))
-      (set! this-context (enrich-context base trick args parent-ctx))
+      (set! this-context (enrich-context base trick real-args parent-ctx))
       this-context)
 
     (define (response? x)
@@ -62,7 +66,10 @@
 
     (define/public (evaluate code)
       (define enrich-context (send (current-frontend) get-enrich-context))
-      (define ev-ctx (evaluation-context enrich-context (current-context-id) #f "" #f))
+      (define ev-ctx (evaluation-context
+                      enrich-context
+                      (current-context-id)
+                      #f "" "" #f))
       (ev:run code ev-ctx response?))
 
     (define/public (call name args)
@@ -77,7 +84,10 @@
                              t)
                            (const #t))
          (define enrich-context (send (current-frontend) get-enrich-context))
-         (define ev-ctx (evaluation-context enrich-context (current-context-id) trick-obj args #f))
+         (define ev-ctx (evaluation-context
+                         enrich-context
+                         (current-context-id)
+                         trick-obj name args #f))
          (define code (trick-body trick-obj))
          (ev:run code ev-ctx response?)]
         [else

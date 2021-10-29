@@ -1,6 +1,6 @@
 #lang scribble/manual
 
-@(require (for-label racket/base))
+@(require (for-label racket/base (only-in racket/math natural?) racket/contract))
 
 @title{R16 -- Community-Driven Interactive Code Evaluation}
 
@@ -60,6 +60,10 @@ If @racket[argument] is @racket[#f], then an empty string is passed to the subtr
 Text of the message after the bot command, as a string.
 }
 
+@defthing[trick-name string?]{
+The name of the currently running trick, as a string. For ad-hoc evaluations, the string is empty.
+}
+
 @defproc[(read-args) (or/c (listof any/c) #f)]{
 Function that returns @racket[string-args], but as a list of datums read by @racket[read]. If there is a read failure, @racket[#f] is returned.
 }
@@ -90,12 +94,12 @@ The @tt{frontend} object in the configuration file can have the following keys a
 ]
 
 @subsection{Trick Environment Extensions}
+
 In additional to the bindings described above, the following items are available in the
 trick environment.
 
-
 @defproc[(delete-caller) void?]{
-Thunk that deletes the message that invoked this sandbox.
+Delete the message that invoked this sandbox.
 }
 
 @defproc[(emote-lookup [name string?]) (or/c string? #f)]{
@@ -110,7 +114,7 @@ Function that returns the PNG data of the emote with ID @racket[id], or @racket[
                           [name (or/c string? bytes?)]
                           [mime (or/c symbol? string? bytes?)]) any/c]{
 Creates an attachment with payload @racket[payload], filename @racket[name], and MIME-type @racket[mime].
-This opaque object must be returned from the trick to be sent to Discord.
+This object must be returned from the trick to be sent to Discord.
 If more than one attachment is returned, an unspecified one is sent.
 }
 
@@ -139,3 +143,26 @@ A trick's "trick-local storage" can be per-guild, per-channel, or per-user; each
 }
 
 This will always be a no-op when invoked from the eval command.
+
+@defproc[(attachment-data [attachment any/c]) bytes?]{
+Get the payload of an attachment created with @racket[make-attachment].
+}
+
+@defproc[(open-attachment [index natural? 0]) (or/c input-port? #f)]{
+Opens the @racket[index]th attachment of the message that invoked this sandbox, as an input port.
+
+Returns @racket[#f] if the message doesn't have an @racket[index]th attachment, or
+if the attachment couldn't be opened for any other reason.
+}
+
+@defproc[(open-reply-attachment [index natural? 0]) (or/c input-port? #f)]{
+Same as @racket[open-attachment], except fetching the attachment of the message that the invoking message replied to.
+}
+
+@defthing[attachment-count natural?]{
+The number of files attached to the message that invoked this sandbox.
+}
+
+@defthing[reply-attachment-count natural?]{
+The number of files attached to the message that the invoking message replied to.
+}
